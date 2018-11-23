@@ -1,0 +1,9 @@
+build/
+Build/
+data/
+Data/
+*.jpg
+*.png
+*.dat
+*.pyc
+
