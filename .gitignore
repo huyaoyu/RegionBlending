@@ -6,4 +6,6 @@ Data/
 *.png
 *.dat
 *.pyc
+.vscode/
+*.code-workspace
 
