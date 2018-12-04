@@ -40,7 +40,7 @@ message(STATUS "Boost_LIBRARIES: ${Boost_LIBRARIES}")
 INCLUDE_DIRECTORIES( $ENV{EIGEN_ROOT} )
 
 # Declare the executable target built from your sources
-add_executable(TestBlending_exe main.cpp)
+add_executable(TestBlending_exe StandaloneFunctions.cpp main.cpp)
 
 # Link your application with OpenCV libraries
 target_link_libraries(TestBlending_exe ${OpenCV_LIBS} ${Boost_LIBRARIES})
