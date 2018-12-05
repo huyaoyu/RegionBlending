@@ -10,8 +10,9 @@
 #include <boost/filesystem.hpp>
 #include <boost/optional.hpp>
 
-#include <Eigen/Dense>
+#include <Eigen/Eigen>
 
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -19,6 +20,7 @@
 #include <opencv2/stitching/detail/exposure_compensate.hpp>
 #include <opencv2/stitching/detail/seam_finders.hpp>
 
+#include "CSVParser.hpp"
 #include "StandaloneFunctions.hpp"
 
 void test_side_by_side_blending(std::string& imgFn0, std::string& imgFn1, double scaleFactor)
@@ -1071,14 +1073,27 @@ void test_multi_image_homography(void)
     cv::imwrite("canvas.jpg", canvas);
 }
 
-void test_multi_image_homography_direct_blending(void)
+void test_multi_image_homography_direct_blending(bool skipBlending)
 {
     // Find all the homography files at once.
     // std::string basePath = "../Data/edge_scale_0.1_B";
-    std::string basePath = "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/Resized/BimosWD";
+    const std::string basePath = "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/Resized/BimosWD";
 
     const path inputPath = basePath + "/homographies";
     const path filePattern = "*.yml";
+
+    // Parse the CSV file first.
+    const std::string csvFile = basePath + "/A_offset_XY.csv";
+    // csv::CSVParser csvParser;
+
+    csv::Table_t table;
+    // Eigen::MatrixXd csvMatrixData;
+    std::vector<int> idxKFInCSVTable;
+    csv::CSVParser::parse( csvFile, table, -552835.874403, -4629657.72452);
+    csv::CSVParser::show_table( table );
+    // csv::CSVParser::convert_data_to_Eigen( table, csvMatrixData );
+
+    std::cout << csvFile << " parsed." << std::endl;
 
     std::vector<std::string> files;
     find_files(inputPath, ".yml", files);
@@ -1142,6 +1157,9 @@ void test_multi_image_homography_direct_blending(void)
         // std::cout << "imgFn = " << imgFn << std::endl;
         // std::cout << "H = " << H << ", type is " << H.type() << std::endl;
 
+        tempString = p.stem().string();
+        idxKFInCSVTable.push_back( std::stoi( tempString.substr( 5, tempString.length() - 5 ) ) );
+
         fs.release();
 
         img = cv::imread( imgFn, cv::IMREAD_COLOR );
@@ -1173,22 +1191,6 @@ void test_multi_image_homography_direct_blending(void)
         // std::cout << "minX0 = " << minX0 << ", minY0 = " << minY0 << std::endl
         //           << "maxX0 = " << maxX0 << ", maxY0 = " << maxY0 << std::endl;
 
-        maskOri = cv::Mat( img.size(), CV_8UC1 );
-        maskOri.setTo( cv::Scalar::all(255) );
-
-        // Warp the images and the associated masks.
-        warppedWidth  = (int)( maxX0 - minX0 ) + 1;
-        warppedHeight = (int)( maxY0 - minY0 ) + 1;
-
-        localShift = cv::Mat::eye( 3, 3, CV_64FC1 );
-        localShift.at<double>(0, 2) = -minX0;
-        localShift.at<double>(1, 2) = -minY0;
-
-        tempSize = cv::Size( warppedWidth, warppedHeight );
-
-        cv::warpPerspective(     img,  warppedImg, localShift * H, tempSize );
-        cv::warpPerspective( maskOri, warppedMask, localShift * H, tempSize );
-
         if ( 0 == count )
         {
             minX = minX0; minY = minY0; maxX = maxX0; maxY = maxY0;
@@ -1201,14 +1203,33 @@ void test_multi_image_homography_direct_blending(void)
             maxY = std::max( maxY0, maxY );
         }
 
-        warppedImgVec.push_back( warppedImg.clone() );
-        warppedMaskVec.push_back( warppedMask.clone() );
+        if ( false == skipBlending )
+        {
+            maskOri = cv::Mat( img.size(), CV_8UC1 );
+            maskOri.setTo( cv::Scalar::all(255) );
 
-        warppedImgUMatVec.push_back(   warppedImgVec[count].getUMat(cv::ACCESS_READ) );
-        warppedMaskUMatVec.push_back( warppedMaskVec[count].getUMat(cv::ACCESS_READ) );
+            // Warp the images and the associated masks.
+            warppedWidth  = (int)( maxX0 - minX0 ) + 1;
+            warppedHeight = (int)( maxY0 - minY0 ) + 1;
 
-        warppedImgUMatVec.at(count).convertTo( tempFloat, CV_32F );
-        seamFinderImages.push_back( tempFloat.clone() );
+            localShift = cv::Mat::eye( 3, 3, CV_64FC1 );
+            localShift.at<double>(0, 2) = -minX0;
+            localShift.at<double>(1, 2) = -minY0;
+
+            tempSize = cv::Size( warppedWidth, warppedHeight );
+
+            cv::warpPerspective(     img,  warppedImg, localShift * H, tempSize );
+            cv::warpPerspective( maskOri, warppedMask, localShift * H, tempSize );
+
+            warppedImgVec.push_back( warppedImg.clone() );
+            warppedMaskVec.push_back( warppedMask.clone() );
+
+            warppedImgUMatVec.push_back(   warppedImgVec[count].getUMat(cv::ACCESS_READ) );
+            warppedMaskUMatVec.push_back( warppedMaskVec[count].getUMat(cv::ACCESS_READ) );
+
+            warppedImgUMatVec.at(count).convertTo( tempFloat, CV_32F );
+            seamFinderImages.push_back( tempFloat.clone() );
+        }
 
         count++;
 
@@ -1219,74 +1240,118 @@ void test_multi_image_homography_direct_blending(void)
         // }
     }
 
-    std::cout << "Finding the seams..." << std::endl;
-
-    seamFinder->find( seamFinderImages, cpVec, warppedMaskUMatVec );
-
-    // seamFinderImages.clear();
-
-    cv::Rect blenderRect((int)minX, (int)minY, (int)( maxX - minX ) + 1, (int)( maxY - minY ) + 1);
-
-    blender.prepare( blenderRect );
-
-    int nImgs = warppedImgVec.size();
-
-    cv::Mat dilatedMask, seamMask;
-    cv::Mat dilateKernel = cv::Mat();
-    cv::Mat warppedMaskBlender;
-    cv::Mat warppedImgS;
-
-    for ( int i = 0; i < nImgs; i++ )
+    if ( false == skipBlending )
     {
-        std::cout << "Blender feeding image " << i << "." << std::endl;
-        cv::dilate(warppedMaskUMatVec[i], dilatedMask, dilateKernel);
-        cv::resize(dilatedMask, seamMask, warppedMaskUMatVec[i].size(), 0, 0, cv::INTER_LINEAR_EXACT);
-        warppedMaskBlender = seamMask & warppedMaskVec[i];
+        std::cout << "Finding the seams..." << std::endl;
 
-        warppedImgVec[i].convertTo( warppedImgS, CV_16S );
+        seamFinder->find( seamFinderImages, cpVec, warppedMaskUMatVec );
 
-        blender.feed( warppedImgS, warppedMaskBlender, cpVec[i] );
+        // seamFinderImages.clear();
 
-        // // Debug
-        // if ( 8 == i || 9 == i || 10 == i )
+        cv::Rect blenderRect((int)minX, (int)minY, (int)( maxX - minX ) + 1, (int)( maxY - minY ) + 1);
+
+        blender.prepare( blenderRect );
+
+        int nImgs = warppedImgVec.size();
+
+        cv::Mat dilatedMask, seamMask;
+        cv::Mat dilateKernel = cv::Mat();
+        cv::Mat warppedMaskBlender;
+        cv::Mat warppedImgS;
+
+        for ( int i = 0; i < nImgs; i++ )
+        {
+            std::cout << "Blender feeding image " << i << "." << std::endl;
+            cv::dilate(warppedMaskUMatVec[i], dilatedMask, dilateKernel);
+            cv::resize(dilatedMask, seamMask, warppedMaskUMatVec[i].size(), 0, 0, cv::INTER_LINEAR_EXACT);
+            warppedMaskBlender = seamMask & warppedMaskVec[i];
+
+            warppedImgVec[i].convertTo( warppedImgS, CV_16S );
+
+            blender.feed( warppedImgS, warppedMaskBlender, cpVec[i] );
+
+            // // Debug
+            // if ( 8 == i || 9 == i || 10 == i )
+            // {
+            //     ss.str(""); ss.clear();
+            //     ss << "seamMask_" << i << ".jpg";
+
+            //     cv::imwrite(ss.str(), seamMask);
+
+            //     ss.str(""); ss.clear();
+            //     ss << "warppedMaskBlender_" << i << ".jpg";
+            //     cv::imwrite(ss.str(), warppedMaskBlender);
+            // }
+        }
+
+        cv::Mat blendedImage, blendedMask;
+        blender.blend( blendedImage, blendedMask );
+
+        blendedImage.convertTo( blendedImage, CV_8UC3 );
+
+        // // Debug.
+        // cv::Mat gsh = cv::Mat::eye( 3, 3, CV_64FC1 );
+        // gsh.at<double>(0, 2) = -minX;
+        // gsh.at<double>(1, 2) = -minY;
+        // cv::Mat shiftedCenterPoint;
+        // for ( int i = 0; i < nImgs; i++ )
         // {
-        //     ss.str(""); ss.clear();
-        //     ss << "seamMask_" << i << ".jpg";
+        //     shiftedCenterPoint = gsh * warppedCenterPointVec.at(i);
 
-        //     cv::imwrite(ss.str(), seamMask);
+        //     // std::cout << "shiftedCenterPoint = " << shiftedCenterPoint << std::endl;
 
         //     ss.str(""); ss.clear();
-        //     ss << "warppedMaskBlender_" << i << ".jpg";
-        //     cv::imwrite(ss.str(), warppedMaskBlender);
+        //     ss << i;
+        //     cv::putText( blendedImage, ss.str(), 
+        //         cv::Point( (int)(shiftedCenterPoint.at<double>(0, 0)), (int)(shiftedCenterPoint.at<double>(1, 0)) ), 
+        //         cv::FONT_HERSHEY_COMPLEX, 1, cv::Scalar::all(255), 1, 0 );
         // }
+
+        cv::imwrite("MultiImageBlendingDirectly.jpg", blendedImage);
+
+        cv::namedWindow("Blended", cv::WINDOW_NORMAL);
+        cv::imshow("Blended", blendedImage);
+        cv::waitKey();
+    }
+    
+    cv::Mat gsh = cv::Mat::eye( 3, 3, CV_64FC1 );
+    gsh.at<double>(0, 2) = -minX;
+    gsh.at<double>(1, 2) = -minY;
+    cv::Mat shiftedCenterPoint;
+    int idxCSV;
+    std::vector<cv::Point2f> pointSrc, pointDst;
+
+    for ( int i = 0; i < idxKFInCSVTable.size(); i++ )
+    {
+        shiftedCenterPoint = gsh * warppedCenterPointVec.at(i);
+
+        pointSrc.push_back( 
+            cv::Point2f( shiftedCenterPoint.at<double>(0, 0), shiftedCenterPoint.at<double>(0, 1) ) );
+
+        idxCSV = idxKFInCSVTable[i];
+
+        pointDst.push_back( 
+            cv::Point2f( table[idxCSV].east, table[idxCSV].north ) );
     }
 
-    cv::Mat blendedImage, blendedMask;
-    blender.blend( blendedImage, blendedMask );
+    std::cout << "Finding GPSHomography..." << std::endl;
 
-    blendedImage.convertTo( blendedImage, CV_8UC3 );
+    cv::Mat GPSHomography;
 
-    // // Debug.
-    // cv::Mat gsh = cv::Mat::eye( 3, 3, CV_64FC1 );
-    // gsh.at<double>(0, 2) = -minX;
-    // gsh.at<double>(1, 2) = -minY;
-    // cv::Mat shiftedCenterPoint;
-    // for ( int i = 0; i < nImgs; i++ )
-    // {
-    //     shiftedCenterPoint = gsh * warppedCenterPointVec.at(i);
+    GPSHomography = cv::findHomography( pointSrc, pointDst, cv::RANSAC, 3, cv::noArray(), 1000, 0.995 );
 
-    //     // std::cout << "shiftedCenterPoint = " << shiftedCenterPoint << std::endl;
+    std::cout << "GPSHomography = " << std::endl;
+    std::cout << GPSHomography << std::endl;
 
-    //     ss.str(""); ss.clear();
-    //     ss << i;
-    //     cv::putText( blendedImage, ss.str(), 
-    //         cv::Point( (int)(shiftedCenterPoint.at<double>(0, 0)), (int)(shiftedCenterPoint.at<double>(1, 0)) ), 
-    //         cv::FONT_HERSHEY_COMPLEX, 1, cv::Scalar::all(255), 1, 0 );
-    // }
+    // Calculate the upper left and the bottom right corener points.
+    cv::Mat finalCornerPoints(3, 2, CV_64FC1);
+    finalCornerPoints.at<double>(0, 0) =                      0.0; finalCornerPoints.at<double>(1, 0) =                      0.0; finalCornerPoints.at<double>(2, 0) = 1.0;
+    finalCornerPoints.at<double>(0, 1) = (int)( maxX - minX ) + 1; finalCornerPoints.at<double>(1, 1) = (int)( maxY - minY ) + 1; finalCornerPoints.at<double>(2, 1) = 1.0;
 
-    cv::imwrite("MultiImageBlendingDirectly.jpg", blendedImage);
+    cv::Mat finalCornerPointsGPS( finalCornerPoints.size(), CV_64FC1 );
 
-    cv::namedWindow("Blended", cv::WINDOW_NORMAL);
-    cv::imshow("Blended", blendedImage);
-    cv::waitKey();
+    finalCornerPointsGPS = GPSHomography * finalCornerPoints;
+
+    std::cout << "The final corner points are: " << std::endl;
+    std::cout << finalCornerPointsGPS << std::endl;
 }

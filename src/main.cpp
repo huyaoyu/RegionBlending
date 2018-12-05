@@ -3,6 +3,7 @@
 #include <string>
 #include <ctime>
 
+#include "CSVParser.hpp"
 #include "StandaloneFunctions.hpp"
 
 std::string imgFn0 = "../Data/space_eye.jpg";
@@ -36,15 +37,15 @@ int main(void)
     // std::clock_t begin = std::clock();
     // test_multi_image_homography();
     // std::clock_t end = std::clock();
-
     // std::cout << "Time elapsed " << double( end - begin ) / CLOCKS_PER_SEC << "s." << std::endl;
 
     // test_two_image_homography_direct_blending();
 
-    std::clock_t begin = std::clock();
-    test_multi_image_homography_direct_blending();
-    std::clock_t end = std::clock();
+    // csv::test_read_csv( "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/A_offset_XY.csv" );
 
+    std::clock_t begin = std::clock();
+    test_multi_image_homography_direct_blending(true);
+    std::clock_t end = std::clock();
     std::cout << "Time elapsed " << double( end - begin ) / CLOCKS_PER_SEC << "s." << std::endl;
 
     return 0;

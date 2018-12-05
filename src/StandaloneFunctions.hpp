@@ -10,6 +10,6 @@ void test_boost_filesystem_and_opencv_yaml(void);
 void test_two_image_homography(void);
 void test_two_image_homography_direct_blending(void);
 void test_multi_image_homography(void);
-void test_multi_image_homography_direct_blending(void);
+void test_multi_image_homography_direct_blending(bool skipBlending = false);
 
 #endif // __STANDALONEFUNCTIONS_HPP__

@@ -21,6 +21,7 @@ set(Boost_USE_STATIC_LIBS       OFF)
 set(Boost_USE_MULTITHREADED      ON)
 set(Boost_USE_STATIC_RUNTIME    OFF)
 find_package(Boost COMPONENTS filesystem)
+# find_package(Boost REQUIRED)
 
 # If the package has been found, several variables will
 # be set, you can find the full list with descriptions
@@ -39,8 +40,13 @@ message(STATUS "Boost_LIBRARIES: ${Boost_LIBRARIES}")
 # Eigen.
 INCLUDE_DIRECTORIES( $ENV{EIGEN_ROOT} )
 
+# Search for source files.
+FILE(GLOB SRC_FILES *.cpp)
+
+message(STATUS "SRC_FILES: ${SRC_FILES}")
+
 # Declare the executable target built from your sources
-add_executable(TestBlending_exe StandaloneFunctions.cpp main.cpp)
+add_executable(TestBlending_exe ${SRC_FILES})
 
 # Link your application with OpenCV libraries
 target_link_libraries(TestBlending_exe ${OpenCV_LIBS} ${Boost_LIBRARIES})
