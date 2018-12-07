@@ -32,7 +32,9 @@ using namespace mapper;
 using namespace std;
 
 BlendedMapper::BlendedMapper()
-: mBlenderBand(5)
+: mBlenderBand(5),
+  mImageType(PNG),
+  mFlagDebug(false), mDebugCount(0)
 {
 
 }
@@ -50,6 +52,31 @@ void BlendedMapper::set_blender_band(int b)
 int BlendedMapper::get_blender_band(void)
 {
     return mBlenderBand;
+}
+
+void BlendedMapper::set_output_image_type(ImageType_t t)
+{
+    mImageType = t;
+}
+
+BlendedMapper::ImageType_t BlendedMapper::get_output_image_type(void)
+{
+    return mImageType;
+}
+
+void BlendedMapper::enable_debug(void)
+{
+    mFlagDebug = true;
+}
+
+void BlendedMapper::disable_debug(void)
+{
+    mFlagDebug = false;
+}
+
+void BlendedMapper::set_debug_count(int c)
+{
+    mDebugCount = c;
 }
 
 static void convert_csv_table(csv::Table_t& table)
@@ -163,9 +190,10 @@ static void parse_csv(const string& gpsFile, csv::Table_t& table, double& shiftE
     csv::CSVParser::show_table( table );
 }
 
-static void directly_blend( const string& baseDir, const vector<string>& files,
+void BlendedMapper::directly_blend( const string& baseDir, const vector<string>& files,
     vector<Mat>& warppedCenterPointVec, vector<int>& idxKFInCSVTable, 
     Mat& gsh, Mat& finalCornerPoints,
+    const string& blendedFilename, 
     int blenderBand, bool skipBlending )
 {
     // Read the homography matrices.
@@ -299,11 +327,15 @@ static void directly_blend( const string& baseDir, const vector<string>& files,
 
         count++;
 
-        // // Debug.
-        // if ( 30 == count )
-        // {
-        //     break;
-        // }
+        // Debug.
+        if ( true == mFlagDebug )
+        {
+            if ( mDebugCount == count )
+            {
+                cout << "Stop due to the enabled debug flag." << endl;
+                break;
+            }
+        }
     }
 
     if ( false == skipBlending )
@@ -373,7 +405,52 @@ static void directly_blend( const string& baseDir, const vector<string>& files,
         //         FONT_HERSHEY_COMPLEX, 1, Scalar::all(255), 1, 0 );
         // }
 
-        imwrite("MultiImageBlendingDirectly.jpg", blendedImage);
+        string outputFilename = blendedFilename;
+        vector<int> imgParams;
+        Mat tempMat;
+
+        switch ( mImageType )
+        {
+            case JPEG:
+            {
+                outputFilename += ".jpg";
+
+                imgParams.push_back( IMWRITE_JPEG_QUALITY );
+                imgParams.push_back( 100 );
+
+                break;
+            }
+            case PNG:
+            {
+                outputFilename += ".png";
+                Mat tempGray;
+                Mat tempMask;
+
+                cvtColor( blendedImage, tempGray, COLOR_BGR2GRAY );
+                cvtColor( blendedImage, tempMat, COLOR_BGR2BGRA );
+
+                threshold( tempGray, tempMask, 0.0, 255.0, THRESH_BINARY_INV );
+                tempMask.convertTo( tempMask, CV_8UC1 );
+
+                tempMat.setTo( Scalar::all(0), tempMask );
+
+                blendedImage = tempMat;
+
+                imgParams.push_back( IMWRITE_PNG_COMPRESSION );
+                imgParams.push_back( 0 );
+
+                break;
+            }
+            default:
+            {
+                // Should never be here.
+                stringstream ss;
+                ss << "Unexpected image format code " << mImageType;
+                BOOST_THROW_EXCEPTION( MapperException() << wz::ExceptionInfoString( ss.str() ) );
+            }
+        }
+
+        imwrite(outputFilename, blendedImage, imgParams);
 
         namedWindow("Blended", WINDOW_NORMAL);
         imshow("Blended", blendedImage);
@@ -398,7 +475,7 @@ static void find_final_cornerpoints_GPS(
     int idxCSV;
     vector<Point2f> pointSrc, pointDst;
 
-    for ( int i = 0; i < idxKFInCSVTable.size(); i++ )
+    for ( int i = 0; i < warppedCenterPointVec.size(); i++ )
     {
         shiftedCenterPoint = gsh * warppedCenterPointVec.at(i);
 
@@ -489,6 +566,7 @@ void BlendedMapper::multi_image_homography_direct_blending(
     directly_blend( baseDir, files,
         warppedCenterPointVec, idxKFInCSVTable, 
         gsh, finalCornerPoints,
+        "MultiImageBlendingDirectly", 
         mBlenderBand, skipBlending );
     
     // Final corner points.
