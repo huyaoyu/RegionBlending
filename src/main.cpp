@@ -4,7 +4,10 @@
 #include <ctime>
 
 #include "CSVParser.hpp"
+#include "Geodesy.hpp"
+#include "GeodesyThirdParty.hpp"
 #include "StandaloneFunctions.hpp"
+#include "Mapper.hpp"
 
 std::string imgFn0 = "../Data/space_eye.jpg";
 std::string imgFn1 = "../Data/space_milkyway.jpg";
@@ -42,9 +45,24 @@ int main(void)
     // test_two_image_homography_direct_blending();
 
     // csv::test_read_csv( "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/A_offset_XY.csv" );
+    // csv::test_read_csv( "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/A_offset.csv" );
+
+    // std::clock_t begin = std::clock();
+    // test_multi_image_homography_direct_blending(true);
+    // std::clock_t end = std::clock();
+    // std::cout << "Time elapsed " << double( end - begin ) / CLOCKS_PER_SEC << "s." << std::endl;
+
+    // geo::test_geodesy();
+    // geo::test_geodesy_thirdparty();
+
+    mapper::BlendedMapper bm;
 
     std::clock_t begin = std::clock();
-    test_multi_image_homography_direct_blending(true);
+    bm.multi_image_homography_direct_blending( 
+        "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/Resized/BimosWD",
+        "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/Resized/BimosWD/homographies",
+        "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/Resized/BimosWD/A_offset.csv"
+     );
     std::clock_t end = std::clock();
     std::cout << "Time elapsed " << double( end - begin ) / CLOCKS_PER_SEC << "s." << std::endl;
 

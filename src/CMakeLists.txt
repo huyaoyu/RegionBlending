@@ -40,6 +40,11 @@ message(STATUS "Boost_LIBRARIES: ${Boost_LIBRARIES}")
 # Eigen.
 INCLUDE_DIRECTORIES( $ENV{EIGEN_ROOT} )
 
+# Find PROJ4.
+set(CMAKE_CROSSCOMPILING FALSE)
+find_package(PROJ4 5.2.0)
+message(STATUS "PROJ4_LIBRARIES: ${PROJ4_LIBRARIES}")
+
 # Search for source files.
 FILE(GLOB SRC_FILES *.cpp)
 
@@ -49,4 +54,4 @@ message(STATUS "SRC_FILES: ${SRC_FILES}")
 add_executable(TestBlending_exe ${SRC_FILES})
 
 # Link your application with OpenCV libraries
-target_link_libraries(TestBlending_exe ${OpenCV_LIBS} ${Boost_LIBRARIES})
+target_link_libraries(TestBlending_exe ${OpenCV_LIBS} ${Boost_LIBRARIES} ${PROJ4_LIBRARIES})

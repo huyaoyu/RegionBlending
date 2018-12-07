@@ -22,6 +22,7 @@
 
 #include "CSVParser.hpp"
 #include "StandaloneFunctions.hpp"
+#include "GeodesyThirdParty.hpp"
 
 void test_side_by_side_blending(std::string& imgFn0, std::string& imgFn1, double scaleFactor)
 {
@@ -1073,6 +1074,48 @@ void test_multi_image_homography(void)
     cv::imwrite("canvas.jpg", canvas);
 }
 
+void convert_csv_table(csv::Table_t& table)
+{
+    typedef std::vector<geo::GeoTransform::Point_t> PointVec_t;
+
+    PointVec_t lpVec;
+    PointVec_t enuVec;
+
+    int count = 0; // Debug.
+
+    for ( auto iter = table.begin(); iter != table.end(); ++iter )
+    {
+        lpVec.push_back( geo::GeoTransform::Point_t{ PJ_D2R( (*iter).east ), PJ_D2R( (*iter).north ) } );
+        count++;
+
+        // if ( 1 == count )
+        // {
+        //     break;
+        // }
+    }
+
+    geo::GeoTransform gt(51);
+    gt.lat_lon_to_UTM( lpVec, enuVec );
+
+    for ( int i = 0; i < lpVec.size(); ++i )
+    {
+        table[i].east  = enuVec[i].x;
+        table[i].north = enuVec[i].y;
+    }
+}
+
+void shift_csv_table(csv::Table_t& table, double& shiftEast, double& shiftNorth)
+{
+    shiftEast  = -table[0].east;
+    shiftNorth = -table[0].north;
+
+    for ( auto iter = table.begin(); iter != table.end(); ++iter )
+    {
+        (*iter).east  += shiftEast;
+        (*iter).north += shiftNorth;
+    }
+}
+
 void test_multi_image_homography_direct_blending(bool skipBlending)
 {
     // Find all the homography files at once.
@@ -1083,13 +1126,17 @@ void test_multi_image_homography_direct_blending(bool skipBlending)
     const path filePattern = "*.yml";
 
     // Parse the CSV file first.
-    const std::string csvFile = basePath + "/A_offset_XY.csv";
+    // const std::string csvFile = basePath + "/A_offset_XY.csv";
+    const std::string csvFile = basePath + "/A_offset.csv";
     // csv::CSVParser csvParser;
 
     csv::Table_t table;
     // Eigen::MatrixXd csvMatrixData;
     std::vector<int> idxKFInCSVTable;
-    csv::CSVParser::parse( csvFile, table, -552835.874403, -4629657.72452);
+    // csv::CSVParser::parse( csvFile, table, -552835.874403, -4629657.72452, 1);
+    csv::CSVParser::parse( csvFile, table, 0.0, 0.0, 0); convert_csv_table(table);
+    double shiftEast = 0.0, shiftNorth = 0.0;
+    shift_csv_table( table, shiftEast, shiftNorth );
     csv::CSVParser::show_table( table );
     // csv::CSVParser::convert_data_to_Eigen( table, csvMatrixData );
 
@@ -1352,6 +1399,27 @@ void test_multi_image_homography_direct_blending(bool skipBlending)
 
     finalCornerPointsGPS = GPSHomography * finalCornerPoints;
 
+    // Shift according the east and north shifts.
+    finalCornerPointsGPS.at<double>(0, 0) += -shiftEast;
+    finalCornerPointsGPS.at<double>(1, 0) += -shiftNorth;
+    finalCornerPointsGPS.at<double>(0, 1) += -shiftEast;
+    finalCornerPointsGPS.at<double>(1, 1) += -shiftNorth;
+
     std::cout << "The final corner points are: " << std::endl;
     std::cout << finalCornerPointsGPS << std::endl;
+
+    geo::GeoTransform gt(51);
+
+    geo::Real_t lon = 0.0, lat = 0.0;
+
+    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<double>(0, 0), finalCornerPointsGPS.at<double>(1, 0),
+        lon, lat );
+
+    std::cout.precision(12);
+    std::cout << " Upper left: " << PJ_R2D(lon) << "E, " << PJ_R2D(lat) << "N." << std::endl;
+
+    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<double>(0, 1), finalCornerPointsGPS.at<double>(1, 1),
+        lon, lat );
+
+    std::cout << " Bottom right: " << PJ_R2D(lon) << "E, " << PJ_R2D(lat) << "N." << std::endl;
 }

@@ -30,9 +30,19 @@ void CSVParser::convert_string_to_entry( const vector<string>& line, Entry_t& en
     entry.east   = stod( line[ idxEast ] );
     entry.north  = stod( line[ idxNorth ] );
     entry.height = stod( line[ idxHeight ] );
-    entry.roll   = stod( line[ idxRoll ] );
-    entry.pitch  = stod( line[ idxPitch ] );
-    entry.yaw    = stod( line[ idxYaw ] );
+
+    if ( line.size() > 4 )
+    {
+        entry.roll   = stod( line[ idxRoll ] );
+        entry.pitch  = stod( line[ idxPitch ] );
+        entry.yaw    = stod( line[ idxYaw ] );
+    }
+    else
+    {
+        entry.roll   = 0.0;
+        entry.pitch  = 0.0;
+        entry.yaw    = 0.0;
+    }
 }
 
 void CSVParser::show_single_entry( const Entry_t& entry )
@@ -86,14 +96,18 @@ void CSVParser::convert_data_to_Eigen(const vector<Entry_t>& table, MatrixXd& m)
 }
 
 void CSVParser::parse( string inFn, vector<Entry_t>& table,
-    Real_t shiftEast, Real_t shiftNorth )
+    Real_t shiftEast, Real_t shiftNorth, int omit )
 {
     string line;
 
     ifstream infile( inFn );
-    // Get the first line.
-    getline(infile, line);
-
+    // Omit lines.
+    while ( omit != 0 )
+    {
+        getline(infile, line);
+        omit--;
+    }
+    
     boost::tokenizer<boost::escaped_list_separator<char> >::iterator iterT;
     vector<string> vec;
     string tempStr;
