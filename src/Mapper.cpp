@@ -455,7 +455,21 @@ void BlendedMapper::multi_image_homography_direct_blending(
     csv::Table_t table;
     double shiftEast = 0.0, shiftNorth = 0.0;
 
-    parse_csv(gpsFile, table, shiftEast, shiftNorth);
+    try
+    {
+        parse_csv(gpsFile, table, shiftEast, shiftNorth);
+    }
+    catch ( csv::CSVException& exp )
+    {
+        cout << "Parsing CSV file failed with exception. " << std::endl;
+        if ( string const * expInfoString = boost::get_error_info<wz::ExceptionInfoString>(exp) )
+        {
+            cout << *expInfoString << std::endl;
+        }
+        
+        return;
+    }
+    
 
     cout << gpsFile << " parsed." << endl;
 

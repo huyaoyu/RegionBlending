@@ -6,12 +6,25 @@
 
 #include <Eigen/Eigen>
 
+#include "Common.hpp"
+
 using std::string;
 using std::vector;
 using Eigen::MatrixXd;
 
+#define CSV_EXCEPTION_FILE_NOT_EXIST(f) \
+    {\
+        std::stringstream f##_ss;\
+        f##_ss << "Input CSV file " \
+               << f << " does not exist.";\
+        BOOST_THROW_EXCEPTION( CSVFileNotExist() << wz::ExceptionInfoString(f##_ss.str()) );\
+    }
+
 namespace csv
 {
+
+struct CSVException    : virtual wz::exception_base { };
+struct CSVFileNotExist : virtual CSVException{ };
 
 typedef double Real_t;
 

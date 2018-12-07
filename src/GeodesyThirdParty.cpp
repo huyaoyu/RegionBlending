@@ -84,9 +84,15 @@ void GeoTransform::lat_lon_to_UTM(const vector<Point_t>& lps, vector<Point_t>& u
 
     if ( 0 != res )
     {
+        delete coordArray; coordArray = NULL;
+        
         cout << "Error: proj_trans_array() failed." << endl;
-        cout << "PROJ4 error message: " << endl;
-        cout << proj_errno_string( proj_errno(mProjector) ) << endl;
+
+        stringstream expSS;
+        expSS << "PROJ4 fails with error message: " 
+              << proj_errno_string( proj_errno(mProjector) );
+
+        GEO_ERROR_MESSAGE( expSS.str() );
     }
 
     // Conver the PJ_COORD array back into std::vector.
@@ -136,7 +142,15 @@ void GeoTransform::UTM_to_lat_lon(const vector<Point_t>& utms, vector<Point_t>& 
 
     if ( 0 != res )
     {
+        delete coordArray; coordArray = NULL;
+
         cout << "Error: proj_trans_array() failed." << endl;
+
+        stringstream expSS;
+        expSS << "PROJ4 fails with error message: " 
+              << proj_errno_string( proj_errno(mProjector) );
+
+        GEO_ERROR_MESSAGE( expSS.str() );
     }
 
     // Conver the PJ_COORD array back into std::vector.

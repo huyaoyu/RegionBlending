@@ -61,7 +61,7 @@ int main(void)
     bm.multi_image_homography_direct_blending( 
         "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/Resized/BimosWD",
         "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/Resized/BimosWD/homographies",
-        "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/Resized/BimosWD/A_offset.csv"
+        "/media/yaoyu/DiskE/WJKJ/Datasets/fushun1114/Resized/BimosWD/A_offset_.csv"
      );
     std::clock_t end = std::clock();
     std::cout << "Time elapsed " << double( end - begin ) / CLOCKS_PER_SEC << "s." << std::endl;

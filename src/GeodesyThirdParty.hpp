@@ -6,16 +6,25 @@
 #include <vector>
 #include <proj.h>
 
+#include "Common.hpp"
+
 #define PJ_D2R(x) \
     proj_torad(x)
 
 #define PJ_R2D(x) \
     proj_todeg(x)
 
+#define GEO_ERROR_MESSAGE(msg) \
+    {\
+        BOOST_THROW_EXCEPTION( GEOException() << wz::ExceptionInfoString(msg) );\
+    }
+
 using namespace std;
 
 namespace geo
 {
+
+struct GEOException : virtual wz::exception_base { };
 
 typedef double Real_t;
 

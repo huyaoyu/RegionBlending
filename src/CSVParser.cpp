@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <boost/algorithm/string.hpp>
+#include <boost/filesystem.hpp>
 #include <boost/tokenizer.hpp>
 
 #include "CSVParser.hpp"
@@ -99,6 +100,15 @@ void CSVParser::parse( string inFn, vector<Entry_t>& table,
     Real_t shiftEast, Real_t shiftNorth, int omit )
 {
     string line;
+
+    namespace fs = boost::filesystem;
+
+    // Test existance of inFn.
+    boost::filesystem::path path = inFn;
+    if ( false == fs::is_regular_file( path ) )
+    {
+        CSV_EXCEPTION_FILE_NOT_EXIST(inFn);
+    }
 
     ifstream infile( inFn );
     // Omit lines.
