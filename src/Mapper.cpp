@@ -464,6 +464,69 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
     finalCornerPoints.at<double>(0, 1) = (int)( maxX - minX ) + 1; finalCornerPoints.at<double>(1, 1) = (int)( maxY - minY ) + 1; finalCornerPoints.at<double>(2, 1) = 1.0;
 }
 
+static void scale_points(vector<Point2f>& points, OutputArray _T, OutputArray _S)
+{
+    // Find the bounding values of points.
+    float maxX = points[0].x, minX = points[0].x;
+    float maxY = points[0].y, minY = points[0].y;
+
+    float x = 0.0, y = 0.0;
+
+    for ( auto iter = points.begin(); iter != points.end(); ++iter )
+    {
+        x = (*iter).x;
+        y = (*iter).y;
+
+        if ( x < minX )
+        {
+            minX = x;
+        }
+        else if ( x > maxX )
+        {
+            maxX = x;
+        }
+
+        if ( y < minY )
+        {
+            minY = y;
+        } 
+        else if ( y > maxY)
+        {
+            maxY = y;
+        }
+    }
+
+    // Calculate the average values and the scale factors.
+    float negativeAvgX = -( minX + maxX ) / 2.0;
+    float negativeAvgY = -( minY + maxY ) / 2.0;
+    float factorX = 1.0 / ( ( maxX - minX ) / 2.0 );
+    float factorY = 1.0 / ( ( maxY - minY ) / 2.0 );
+
+    // Matrix of translation.
+    _T.create( 3, 3, CV_32FC1 );
+    Mat T = _T.getMat();
+    T.setTo(Scalar::all(0));
+    T.at<float>(0, 0) = 1.0;
+    T.at<float>(1, 1) = 1.0;
+    T.at<float>(2, 2) = 1.0;
+    T.at<float>(0, 2) = negativeAvgX;
+    T.at<float>(1, 2) = negativeAvgY;
+
+    // Matrix of scale.
+    _S.create( 3, 3, CV_32FC1 );
+    Mat S = _S.getMat();
+    S.setTo(Scalar::all(0));
+    S.at<float>(0, 0) = factorX;
+    S.at<float>(1, 1) = factorY;
+    S.at<float>(2, 2) = 1.0;
+
+    for ( auto iter = points.begin(); iter != points.end(); ++iter )
+    {
+        (*iter).x = ( (*iter).x + negativeAvgX ) * factorX;
+        (*iter).y = ( (*iter).y + negativeAvgY ) * factorY;
+    }
+}
+
 static void find_final_cornerpoints_GPS( 
     const vector<Mat>& warppedCenterPointVec, 
     const vector<int>& idxKFInCSVTable, const csv::Table_t& table,
@@ -479,20 +542,53 @@ static void find_final_cornerpoints_GPS(
     {
         shiftedCenterPoint = gsh * warppedCenterPointVec.at(i);
 
+        // What the object is in reality.
         pointSrc.push_back( 
             Point2f( shiftedCenterPoint.at<double>(0, 0), shiftedCenterPoint.at<double>(0, 1) ) );
 
         idxCSV = idxKFInCSVTable[i];
 
+        // What you get in the filming device.
         pointDst.push_back( 
             Point2f( table[idxCSV].east, table[idxCSV].north ) );
     }
+
+    // Scale the src and dst points.
+    Mat TSrc, TDst; // Matrices of translation.
+    Mat SSrc, SDst; // Matrices of rotation.
+
+    scale_points( pointSrc, TSrc, SSrc );
+    scale_points( pointDst, TDst, SDst );
+
+    cout << "TSrc = " << endl << TSrc << endl;
+    cout << "SSrc = " << endl << SSrc << endl;
+    cout << "TDst = " << endl << TDst << endl;
+    cout << "SDst = " << endl << SDst << endl;
+
+    Mat TDstInv = Mat::eye(3, 3, CV_32FC1);
+    TDstInv.at<float>(0, 2) = -TDst.at<float>(0, 2);
+    TDstInv.at<float>(1, 2) = -TDst.at<float>(1, 2);
+
+    Mat SDstInv = Mat::eye(3, 3, CV_32FC1);
+    SDstInv.at<float>(0, 0) = 1.0 / SDst.at<float>(0, 0);
+    SDstInv.at<float>(1, 1) = 1.0 / SDst.at<float>(1, 1);
 
     cout << "Finding GPSHomography..." << endl;
 
     Mat GPSHomography;
 
     GPSHomography = findHomography( pointSrc, pointDst, RANSAC, 3, noArray(), 1000, 0.995 );
+    GPSHomography.convertTo( GPSHomography, CV_32FC1 );
+
+    cout << "TDstInv.type() = " << TDstInv.type() << endl;
+    cout << "SDstInv.type() = " << SDstInv.type() << endl;
+    cout << "SSrc.type()    = " << SSrc.type() << endl;
+    cout << "TSrc.type()    = " << TSrc.type() << endl;
+    cout << "GPSHomography.type() = " << GPSHomography.type() << endl;
+
+    GPSHomography = TDstInv * SDstInv * GPSHomography * SSrc * TSrc;
+
+    GPSHomography.convertTo( GPSHomography, CV_64FC1 );
 
     cout << "GPSHomography = " << endl;
     cout << GPSHomography << endl;
