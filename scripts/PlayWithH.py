@@ -16,6 +16,8 @@ def show_matrix_list(ml, name = None):
 if __name__ == "__main__":
     # Load H.
     H = np.loadtxt("H.dat", dtype = np.float)
+    print("H = ")
+    print(H)
 
     # H = np.eye(3, dtype = np.float)
     # theta = math.pi / 2
@@ -40,6 +42,7 @@ if __name__ == "__main__":
 
     for i in range(n):
         H1 = R[i] + T[i].dot( N[i].transpose() )
+        H1 /= H1[-1, -1]
         p1 = H1.dot(p0)
         print("i = %d" % (i))
         print(H1)

@@ -970,8 +970,8 @@ void test_two_image_homography_direct_blending(void)
 void test_multi_image_homography(void)
 {
     // Find all the homography files at once.
-    // const path inputPath = "../Data/bimos/homographies";
-    const path inputPath = "../Data/edge_scale_0.1_B/homographies";
+    const path inputPath = "../Data/bimos/homographies";
+    // const path inputPath = "../Data/edge_scale_0.1_B/homographies";
     const path filePattern = "*.yml";
 
     std::vector<std::string> files;
@@ -996,8 +996,8 @@ void test_multi_image_homography(void)
         fs["filename"] >> tempString;
 
         boost::filesystem::path p(tempString);
-        // imgFn = "../Data/bimos/images/" + p.filename().string();
-        imgFn = "../Data/edge_scale_0.1_B/images/" + p.filename().string();
+        imgFn = "../Data/bimos/images/" + p.filename().string();
+        // imgFn = "../Data/edge_scale_0.1_B/images/" + p.filename().string();
         vecImgFn.push_back( imgFn );
         std::cout << count << "/" << nFiles<< ": " << imgFn << std::endl;
 

@@ -27,6 +27,11 @@
         BOOST_THROW_EXCEPTION( argument_null() << ExceptionInfoString(v##_ss.str()) );\
     }
 
+#define EXCEPTION_BASE(s) \
+    {\
+        BOOST_THROW_EXCEPTION( exception_base() << ExceptionInfoString(s) );\
+    }
+
 namespace wz
 {
 

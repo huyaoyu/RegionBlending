@@ -31,7 +31,7 @@ public:
 
     void multi_image_homography_direct_blending(
         const string& baseDir, const string& homoDir, const string& gpsFile,
-        bool skipBlending = false);
+        bool skipBlending = false, bool skipSeamFinding = false);
 
     void set_blender_band(int b);
     int  get_blender_band(void);
@@ -49,7 +49,7 @@ private:
         vector<cv::Mat>& warppedCenterPointVec, vector<int>& idxKFInCSVTable, 
         cv::Mat& gsh, cv::Mat& finalCornerPoints,
         const string& blendedFilename, 
-        int blenderBand, bool skipBlending );
+        int blenderBand, bool skipBlending, bool skipSeamFinding, cv::OutputArray _blended );
 
 protected:
     int mBlenderBand;
@@ -60,7 +60,6 @@ protected:
 
 };
 
-
-}
+} // namespace mapper;
 
 #endif // __MAPPER_HPP__

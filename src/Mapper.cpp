@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -30,6 +31,9 @@ using namespace boost::filesystem;
 using namespace cv;
 using namespace mapper;
 using namespace std;
+using namespace wz;
+
+typedef float Real_t;
 
 BlendedMapper::BlendedMapper()
 : mBlenderBand(5),
@@ -109,7 +113,7 @@ static void convert_csv_table(csv::Table_t& table)
     }
 }
 
-static void shift_csv_table(csv::Table_t& table, double& shiftEast, double& shiftNorth)
+static void shift_csv_table(csv::Table_t& table, Real_t& shiftEast, Real_t& shiftNorth)
 {
     shiftEast  = -table[0].east;
     shiftNorth = -table[0].north;
@@ -150,18 +154,18 @@ static void find_files(const boost::filesystem::path& root,
 }
 
 static void find_bounding_xy(const Mat& cp, 
-    double& minX, double& maxX, double& minY, double& maxY)
+    Real_t& minX, Real_t& maxX, Real_t& minY, Real_t& maxY)
 {
     // Clear minX, etc.
-    minX = cp.at<double>(0, 0); maxX = minX;
-    minY = cp.at<double>(1, 0); maxY = minY;
+    minX = cp.at<Real_t>(0, 0); maxX = minX;
+    minY = cp.at<Real_t>(1, 0); maxY = minY;
 
-    double x, y;
+    Real_t x, y;
 
     // Compare.
     for ( int i = 1; i < cp.cols; i++ )
     {
-        x = cp.at<double>(0, i);
+        x = cp.at<Real_t>(0, i);
         if ( x < minX )
         {
             minX = x;
@@ -171,7 +175,7 @@ static void find_bounding_xy(const Mat& cp,
             maxX = x;
         }
 
-        y = cp.at<double>(1, i);
+        y = cp.at<Real_t>(1, i);
         if ( y < minY )
         {
             minY = y;
@@ -183,18 +187,88 @@ static void find_bounding_xy(const Mat& cp,
     }  
 }
 
-static void parse_csv(const string& gpsFile, csv::Table_t& table, double& shiftEast, double& shiftNorth)
+static void arrange_bounding_xy_as_corners(OutputArray _corners, 
+    Real_t minX, Real_t maxX, Real_t minY, Real_t maxY)
+{
+    _corners.create(3, 4, CV_32FC1);
+    Mat corners = _corners.getMat();
+    corners.setTo(Scalar::all(1));
+
+    corners.at<Real_t>(0, 0) = minX;
+    corners.at<Real_t>(1, 0) = minY;
+
+    corners.at<Real_t>(0, 1) = maxX;
+    corners.at<Real_t>(1, 1) = minY;
+
+    corners.at<Real_t>(0, 2) = maxX;
+    corners.at<Real_t>(1, 2) = maxY;
+
+    corners.at<Real_t>(0, 3) = minX;
+    corners.at<Real_t>(1, 3) = maxY;
+}
+
+static void parse_csv(const string& gpsFile, csv::Table_t& table, Real_t& shiftEast, Real_t& shiftNorth)
 {
     csv::CSVParser::parse( gpsFile, table, 0.0, 0.0, 0); convert_csv_table(table);
     shift_csv_table( table, shiftEast, shiftNorth );
     csv::CSVParser::show_table( table );
 }
 
+static void write_image(const string& fn, const Mat& img, BlendedMapper::ImageType_t t)
+{
+    string outputFilename = fn;
+    vector<int> imgParams;
+    Mat tempMat;
+
+    switch ( t )
+    {
+        case BlendedMapper::JPEG:
+        {
+            outputFilename += ".jpg";
+
+            imgParams.push_back( IMWRITE_JPEG_QUALITY );
+            imgParams.push_back( 100 );
+
+            imwrite(outputFilename, img, imgParams);
+
+            break;
+        }
+        case BlendedMapper::PNG:
+        {
+            outputFilename += ".png";
+            Mat tempGray;
+            Mat tempMask;
+
+            cvtColor( img, tempGray, COLOR_BGR2GRAY );
+            cvtColor( img, tempMat, COLOR_BGR2BGRA );
+
+            threshold( tempGray, tempMask, 0.0, 255.0, THRESH_BINARY_INV );
+            tempMask.convertTo( tempMask, CV_8UC1 );
+
+            tempMat.setTo( Scalar::all(0), tempMask );
+
+            imgParams.push_back( IMWRITE_PNG_COMPRESSION );
+            imgParams.push_back( 0 );
+
+            imwrite(outputFilename, tempMat, imgParams);
+
+            break;
+        }
+        default:
+        {
+            // Should never be here.
+            stringstream ss;
+            ss << "Unexpected image format code " << t;
+            BOOST_THROW_EXCEPTION( MapperException() << wz::ExceptionInfoString( ss.str() ) );
+        }
+    }
+}
+
 void BlendedMapper::directly_blend( const string& baseDir, const vector<string>& files,
     vector<Mat>& warppedCenterPointVec, vector<int>& idxKFInCSVTable, 
-    Mat& gsh, Mat& finalCornerPoints,
+    Mat& gsh, Mat& blendedCornerPoints,
     const string& blendedFilename, 
-    int blenderBand, bool skipBlending )
+    int blenderBand, bool skipBlending, bool skipSeamFinding, OutputArray _blended )
 {
     // Read the homography matrices.
     string imgFn, tempString;
@@ -212,8 +286,8 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
     Mat warppedImg, warppedMask;
     Mat warppedCorners;
     Mat localShift;
-    double minX0, maxX0, minY0, maxY0;
-    double minX = 0, minY = 0, maxX = 0, maxY = 0;
+    Real_t minX0, maxX0, minY0, maxY0;
+    Real_t minX = 0, minY = 0, maxX = 0, maxY = 0;
 
     Mat maskOri;
     int warppedWidth, warppedHeight;
@@ -223,7 +297,7 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
     // Seam finder.
     Ptr<cv::detail::SeamFinder> seamFinder = 
         makePtr<cv::detail::GraphCutSeamFinder>(cv::detail::GraphCutSeamFinderBase::COST_COLOR);
-    UMat tempFloat;
+    UMat tempReal_t;
     vector<UMat> seamFinderImages;
 
     // Blender.
@@ -245,6 +319,7 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
         cout << count+1 << "/" << nFiles<< ": " << imgFn << endl;
 
         fs["H"] >> H;
+        H.convertTo(H, CV_32FC1);
 
         HVec.push_back( H );
 
@@ -259,14 +334,14 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
         img = imread( imgFn, IMREAD_COLOR );
 
         // Create 4 corner poitns for img.
-        Mat CPs = Mat(3, 4, CV_64FC1);
-        CPs.at<double>(0, 0) =          0.0; CPs.at<double>(1, 0) =          0.0; CPs.at<double>(2, 0) = 1.0;
-        CPs.at<double>(0, 1) = img.cols - 1; CPs.at<double>(1, 1) =          0.0; CPs.at<double>(2, 1) = 1.0;
-        CPs.at<double>(0, 2) = img.cols - 1; CPs.at<double>(1, 2) = img.rows - 1; CPs.at<double>(2, 2) = 1.0;
-        CPs.at<double>(0, 3) =          0.0; CPs.at<double>(1, 3) = img.rows - 1; CPs.at<double>(2, 3) = 1.0;
+        Mat CPs = Mat(3, 4, CV_32FC1);
+        CPs.at<Real_t>(0, 0) =          0.0; CPs.at<Real_t>(1, 0) =          0.0; CPs.at<Real_t>(2, 0) = 1.0;
+        CPs.at<Real_t>(0, 1) = img.cols - 1; CPs.at<Real_t>(1, 1) =          0.0; CPs.at<Real_t>(2, 1) = 1.0;
+        CPs.at<Real_t>(0, 2) = img.cols - 1; CPs.at<Real_t>(1, 2) = img.rows - 1; CPs.at<Real_t>(2, 2) = 1.0;
+        CPs.at<Real_t>(0, 3) =          0.0; CPs.at<Real_t>(1, 3) = img.rows - 1; CPs.at<Real_t>(2, 3) = 1.0;
 
-        centerPoint = Mat(3, 1, CV_64FC1);
-        centerPoint.at<double>(0, 0) = img.cols / 2.0; centerPoint.at<double>(1, 0) = img.rows / 2.0; centerPoint.at<double>(2, 0) = 1.0;
+        centerPoint = Mat(3, 1, CV_32FC1);
+        centerPoint.at<Real_t>(0, 0) = img.cols / 2.0; centerPoint.at<Real_t>(1, 0) = img.rows / 2.0; centerPoint.at<Real_t>(2, 0) = 1.0;
 
         // cout << "The original corner points of img are: " << endl;
         // cout << CPs << endl;
@@ -306,9 +381,9 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
             warppedWidth  = (int)( maxX0 - minX0 ) + 1;
             warppedHeight = (int)( maxY0 - minY0 ) + 1;
 
-            localShift = Mat::eye( 3, 3, CV_64FC1 );
-            localShift.at<double>(0, 2) = -minX0;
-            localShift.at<double>(1, 2) = -minY0;
+            localShift = Mat::eye( 3, 3, CV_32FC1 );
+            localShift.at<Real_t>(0, 2) = -minX0;
+            localShift.at<Real_t>(1, 2) = -minY0;
 
             tempSize = Size( warppedWidth, warppedHeight );
 
@@ -318,11 +393,14 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
             warppedImgVec.push_back( warppedImg.clone() );
             warppedMaskVec.push_back( warppedMask.clone() );
 
-            warppedImgUMatVec.push_back(   warppedImgVec[count].getUMat(ACCESS_READ) );
-            warppedMaskUMatVec.push_back( warppedMaskVec[count].getUMat(ACCESS_READ) );
+            if ( false == skipSeamFinding )
+            {
+                warppedImgUMatVec.push_back(   warppedImgVec[count].getUMat(ACCESS_READ) );
+                warppedMaskUMatVec.push_back( warppedMaskVec[count].getUMat(ACCESS_READ) );
 
-            warppedImgUMatVec.at(count).convertTo( tempFloat, CV_32F );
-            seamFinderImages.push_back( tempFloat.clone() );
+                warppedImgUMatVec.at(count).convertTo( tempReal_t, CV_32F );
+                seamFinderImages.push_back( tempReal_t.clone() );
+            }
         }
 
         count++;
@@ -340,9 +418,14 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
 
     if ( false == skipBlending )
     {
-        cout << "Finding the seams..." << endl;
+        if ( false == skipSeamFinding )
+        {
+            cout << "Finding the seams..." << endl;
 
-        seamFinder->find( seamFinderImages, cpVec, warppedMaskUMatVec );
+            seamFinder->find( seamFinderImages, cpVec, warppedMaskUMatVec );
+            seamFinder.release();
+            seamFinderImages.clear();
+        }
 
         // seamFinderImages.clear();
 
@@ -360,9 +443,17 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
         for ( int i = 0; i < nImgs; i++ )
         {
             cout << "Blender feeding image " << i << "." << endl;
-            dilate(warppedMaskUMatVec[i], dilatedMask, dilateKernel);
-            resize(dilatedMask, seamMask, warppedMaskUMatVec[i].size(), 0, 0, INTER_LINEAR_EXACT);
-            warppedMaskBlender = seamMask & warppedMaskVec[i];
+
+            if ( false == skipSeamFinding )
+            {
+                dilate(warppedMaskUMatVec[i], dilatedMask, dilateKernel);
+                resize(dilatedMask, seamMask, warppedMaskUMatVec[i].size(), 0, 0, INTER_LINEAR_EXACT);
+                warppedMaskBlender = seamMask & warppedMaskVec[i];
+            }
+            else
+            {
+                warppedMaskBlender = warppedMaskVec[i];
+            }
 
             warppedImgVec[i].convertTo( warppedImgS, CV_16S );
 
@@ -388,9 +479,9 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
         blendedImage.convertTo( blendedImage, CV_8UC3 );
 
         // // Debug.
-        // Mat gsh = Mat::eye( 3, 3, CV_64FC1 );
-        // gsh.at<double>(0, 2) = -minX;
-        // gsh.at<double>(1, 2) = -minY;
+        // Mat gsh = Mat::eye( 3, 3, CV_32FC1 );
+        // gsh.at<Real_t>(0, 2) = -minX;
+        // gsh.at<Real_t>(1, 2) = -minY;
         // Mat shiftedCenterPoint;
         // for ( int i = 0; i < nImgs; i++ )
         // {
@@ -401,76 +492,35 @@ void BlendedMapper::directly_blend( const string& baseDir, const vector<string>&
         //     ss.str(""); ss.clear();
         //     ss << i;
         //     putText( blendedImage, ss.str(), 
-        //         Point( (int)(shiftedCenterPoint.at<double>(0, 0)), (int)(shiftedCenterPoint.at<double>(1, 0)) ), 
+        //         Point( (int)(shiftedCenterPoint.at<Real_t>(0, 0)), (int)(shiftedCenterPoint.at<Real_t>(1, 0)) ), 
         //         FONT_HERSHEY_COMPLEX, 1, Scalar::all(255), 1, 0 );
         // }
 
-        string outputFilename = blendedFilename;
-        vector<int> imgParams;
-        Mat tempMat;
-
-        switch ( mImageType )
-        {
-            case JPEG:
-            {
-                outputFilename += ".jpg";
-
-                imgParams.push_back( IMWRITE_JPEG_QUALITY );
-                imgParams.push_back( 100 );
-
-                break;
-            }
-            case PNG:
-            {
-                outputFilename += ".png";
-                Mat tempGray;
-                Mat tempMask;
-
-                cvtColor( blendedImage, tempGray, COLOR_BGR2GRAY );
-                cvtColor( blendedImage, tempMat, COLOR_BGR2BGRA );
-
-                threshold( tempGray, tempMask, 0.0, 255.0, THRESH_BINARY_INV );
-                tempMask.convertTo( tempMask, CV_8UC1 );
-
-                tempMat.setTo( Scalar::all(0), tempMask );
-
-                blendedImage = tempMat;
-
-                imgParams.push_back( IMWRITE_PNG_COMPRESSION );
-                imgParams.push_back( 0 );
-
-                break;
-            }
-            default:
-            {
-                // Should never be here.
-                stringstream ss;
-                ss << "Unexpected image format code " << mImageType;
-                BOOST_THROW_EXCEPTION( MapperException() << wz::ExceptionInfoString( ss.str() ) );
-            }
-        }
-
-        imwrite(outputFilename, blendedImage, imgParams);
+        write_image(blendedFilename, blendedImage, mImageType);
 
         namedWindow("Blended", WINDOW_NORMAL);
         imshow("Blended", blendedImage);
         waitKey(1);
+
+        _blended.assign( blendedImage );
     }
 
-    gsh.at<double>(0, 2) = -minX;
-    gsh.at<double>(1, 2) = -minY;
+    gsh.at<Real_t>(0, 2) = -minX;
+    gsh.at<Real_t>(1, 2) = -minY;
 
-    finalCornerPoints.at<double>(0, 0) =                      0.0; finalCornerPoints.at<double>(1, 0) =                      0.0; finalCornerPoints.at<double>(2, 0) = 1.0;
-    finalCornerPoints.at<double>(0, 1) = (int)( maxX - minX ) + 1; finalCornerPoints.at<double>(1, 1) = (int)( maxY - minY ) + 1; finalCornerPoints.at<double>(2, 1) = 1.0;
+    blendedCornerPoints.at<Real_t>(0, 0) =                      0.0; blendedCornerPoints.at<Real_t>(1, 0) =                      0.0; blendedCornerPoints.at<Real_t>(2, 0) = 1.0;
+    blendedCornerPoints.at<Real_t>(0, 1) = (int)( maxX - minX ) + 1; blendedCornerPoints.at<Real_t>(1, 1) =                      0.0; blendedCornerPoints.at<Real_t>(2, 1) = 1.0;
+    blendedCornerPoints.at<Real_t>(0, 2) = (int)( maxX - minX ) + 1; blendedCornerPoints.at<Real_t>(1, 2) = (int)( maxY - minY ) + 1; blendedCornerPoints.at<Real_t>(2, 2) = 1.0;
+    blendedCornerPoints.at<Real_t>(0, 3) =                      0.0; blendedCornerPoints.at<Real_t>(1, 3) = (int)( maxY - minY ) + 1; blendedCornerPoints.at<Real_t>(2, 3) = 1.0;
 }
 
 static void scale_points(vector<Point2f>& points, OutputArray _T, OutputArray _S)
 {
     // Find the bounding values of points.
-    float maxX = points[0].x, minX = points[0].x;
-    float maxY = points[0].y, minY = points[0].y;
+    Real_t maxX = points[0].x, minX = points[0].x;
+    Real_t maxY = points[0].y, minY = points[0].y;
 
-    float x = 0.0, y = 0.0;
+    Real_t x = 0.0, y = 0.0;
 
     for ( auto iter = points.begin(); iter != points.end(); ++iter )
     {
@@ -497,28 +547,28 @@ static void scale_points(vector<Point2f>& points, OutputArray _T, OutputArray _S
     }
 
     // Calculate the average values and the scale factors.
-    float negativeAvgX = -( minX + maxX ) / 2.0;
-    float negativeAvgY = -( minY + maxY ) / 2.0;
-    float factorX = 1.0 / ( ( maxX - minX ) / 2.0 );
-    float factorY = 1.0 / ( ( maxY - minY ) / 2.0 );
+    Real_t negativeAvgX = -( minX + maxX ) / 2.0;
+    Real_t negativeAvgY = -( minY + maxY ) / 2.0;
+    Real_t factorX = 1.0 / ( ( maxX - minX ) / 2.0 );
+    Real_t factorY = 1.0 / ( ( maxY - minY ) / 2.0 );
 
     // Matrix of translation.
     _T.create( 3, 3, CV_32FC1 );
     Mat T = _T.getMat();
     T.setTo(Scalar::all(0));
-    T.at<float>(0, 0) = 1.0;
-    T.at<float>(1, 1) = 1.0;
-    T.at<float>(2, 2) = 1.0;
-    T.at<float>(0, 2) = negativeAvgX;
-    T.at<float>(1, 2) = negativeAvgY;
+    T.at<Real_t>(0, 0) = 1.0;
+    T.at<Real_t>(1, 1) = 1.0;
+    T.at<Real_t>(2, 2) = 1.0;
+    T.at<Real_t>(0, 2) = negativeAvgX;
+    T.at<Real_t>(1, 2) = negativeAvgY;
 
     // Matrix of scale.
     _S.create( 3, 3, CV_32FC1 );
     Mat S = _S.getMat();
     S.setTo(Scalar::all(0));
-    S.at<float>(0, 0) = factorX;
-    S.at<float>(1, 1) = factorY;
-    S.at<float>(2, 2) = 1.0;
+    S.at<Real_t>(0, 0) = factorX;
+    S.at<Real_t>(1, 1) = factorY;
+    S.at<Real_t>(2, 2) = 1.0;
 
     for ( auto iter = points.begin(); iter != points.end(); ++iter )
     {
@@ -527,12 +577,98 @@ static void scale_points(vector<Point2f>& points, OutputArray _T, OutputArray _S
     }
 }
 
+static void points_flip_y( vector<Point2f>& points )
+{
+    for ( auto iter = points.begin(); iter != points.end(); ++iter )
+    {
+        (*iter).y *= -1;
+    }
+}
+
+static void write_points(const vector<Point2f>& points, const string& fn)
+{
+    ofstream ofs;
+    ofs.open( fn );
+
+    for ( auto iter = points.begin(); iter != points.end(); ++iter )
+    {
+        ofs << showpos << scientific << (*iter).x << " " << (*iter).y << endl;
+    }
+    ofs << endl;
+
+    ofs.close();
+}
+
+static void break_frontal_plane_homography(InputArray _H, OutputArray _FS, OutputArray _R)
+{
+    Mat H = _H.getMat();
+
+    // Make a local copy of H.
+    Mat LH(3, 3, CV_32FC1);
+
+    H.copyTo(LH);
+
+    // Normalize LH;
+    LH /= LH.at<Real_t>(2, 2);
+
+    _FS.create( 3, 3, CV_32FC1 );
+    Mat FS = _FS.getMat();
+    FS.setTo(Scalar::all(0));
+
+    _R.create( 3, 3, CV_32FC1 );
+    Mat R = _R.getMat();
+    R.setTo(Scalar::all(0));
+
+    Real_t f = sqrt( 
+        fabs( LH.at<Real_t>(0, 0) * LH.at<Real_t>(1, 1) ) + 
+        fabs( LH.at<Real_t>(0, 1) * LH.at<Real_t>(1, 0) )  );
+    
+    FS.at<Real_t>(0, 0) = f; FS.at<Real_t>(0, 2) = LH.at<Real_t>(0, 2);
+    FS.at<Real_t>(1, 1) = f; FS.at<Real_t>(1, 2) = LH.at<Real_t>(1, 2);
+    FS.at<Real_t>(2, 2) = 1.0;
+
+    R.at<Real_t>(0, 0) = LH.at<Real_t>(0, 0) / f; R.at<Real_t>(0, 1) = LH.at<Real_t>(0, 1) / f;
+    R.at<Real_t>(1, 0) = LH.at<Real_t>(1, 0) / f; R.at<Real_t>(1, 1) = LH.at<Real_t>(1, 1) / f;
+    R.at<Real_t>(2, 2) = 1.0;
+}
+
+template<typename _T> 
+static void write_mat_single_channel(const string& fn, const Mat& m)
+{
+    using namespace wz;
+
+    // Assuming the single channel Mat object.
+    if ( 1 != m.channels() )
+    {
+        EXCEPTION_BASE( "write_mat_single_channel only accepts single channel arrays" )
+    }
+
+    ofstream ofs;
+    ofs.open( fn );
+
+    const _T* p = NULL;
+
+    // Local copy of m.
+    for ( int i = 0; i < m.rows; ++i )
+    {
+        p = m.ptr<_T>( i );
+        for ( int j = 0; j < m.cols; ++j )
+        {
+            ofs << showpos << scientific << *(p + j) << " ";
+        }
+        ofs << endl;
+    }
+
+    ofs.close();
+}
+
 static void find_final_cornerpoints_GPS( 
     const vector<Mat>& warppedCenterPointVec, 
     const vector<int>& idxKFInCSVTable, const csv::Table_t& table,
-    const Mat& gsh, const Mat& finalCornerPoints, 
-    double shiftEast, double shiftNorth,
-    Mat& finalCornerPointsGPS )
+    const Mat& gsh, const Mat& blendedCornerPoints, 
+    Real_t shiftEast, Real_t shiftNorth,
+    OutputArray _finalCornerPointsGPS, 
+    OutputArray _finalRotateH  )
 {
     Mat shiftedCenterPoint;
     int idxCSV;
@@ -544,7 +680,7 @@ static void find_final_cornerpoints_GPS(
 
         // What the object is in reality.
         pointSrc.push_back( 
-            Point2f( shiftedCenterPoint.at<double>(0, 0), shiftedCenterPoint.at<double>(0, 1) ) );
+            Point2f( shiftedCenterPoint.at<Real_t>(0, 0), shiftedCenterPoint.at<Real_t>(0, 1) ) );
 
         idxCSV = idxKFInCSVTable[i];
 
@@ -553,6 +689,11 @@ static void find_final_cornerpoints_GPS(
             Point2f( table[idxCSV].east, table[idxCSV].north ) );
     }
 
+    // Flip the y-axis of the dst points.
+    // This is due to the fact that the pixel coordinate and the UTM coordinate have
+    // opposite z-axis direction.
+    points_flip_y(pointDst);
+
     // Scale the src and dst points.
     Mat TSrc, TDst; // Matrices of translation.
     Mat SSrc, SDst; // Matrices of rotation.
@@ -560,25 +701,30 @@ static void find_final_cornerpoints_GPS(
     scale_points( pointSrc, TSrc, SSrc );
     scale_points( pointDst, TDst, SDst );
 
+    write_points( pointSrc, "pointSrc.dat" );
+    write_points( pointDst, "pointDst.dat" );
+
     cout << "TSrc = " << endl << TSrc << endl;
     cout << "SSrc = " << endl << SSrc << endl;
     cout << "TDst = " << endl << TDst << endl;
     cout << "SDst = " << endl << SDst << endl;
 
     Mat TDstInv = Mat::eye(3, 3, CV_32FC1);
-    TDstInv.at<float>(0, 2) = -TDst.at<float>(0, 2);
-    TDstInv.at<float>(1, 2) = -TDst.at<float>(1, 2);
+    TDstInv.at<Real_t>(0, 2) = -TDst.at<Real_t>(0, 2);
+    TDstInv.at<Real_t>(1, 2) = -TDst.at<Real_t>(1, 2);
 
     Mat SDstInv = Mat::eye(3, 3, CV_32FC1);
-    SDstInv.at<float>(0, 0) = 1.0 / SDst.at<float>(0, 0);
-    SDstInv.at<float>(1, 1) = 1.0 / SDst.at<float>(1, 1);
+    SDstInv.at<Real_t>(0, 0) = 1.0 / SDst.at<Real_t>(0, 0);
+    SDstInv.at<Real_t>(1, 1) = 1.0 / SDst.at<Real_t>(1, 1);
 
     cout << "Finding GPSHomography..." << endl;
 
-    Mat GPSHomography;
+    Mat GPSHomography, HomoFS, HomoR, HomoFlip;
 
-    GPSHomography = findHomography( pointSrc, pointDst, RANSAC, 3, noArray(), 1000, 0.995 );
+    GPSHomography = findHomography( pointSrc, pointDst, RANSAC, 2, noArray(), 10000, 0.999 );
     GPSHomography.convertTo( GPSHomography, CV_32FC1 );
+
+    write_mat_single_channel<Real_t>("GPSHomography.dat", GPSHomography);
 
     cout << "TDstInv.type() = " << TDstInv.type() << endl;
     cout << "SDstInv.type() = " << SDstInv.type() << endl;
@@ -588,18 +734,39 @@ static void find_final_cornerpoints_GPS(
 
     GPSHomography = TDstInv * SDstInv * GPSHomography * SSrc * TSrc;
 
-    GPSHomography.convertTo( GPSHomography, CV_64FC1 );
+    GPSHomography /= GPSHomography.at<Real_t>(2, 2);
 
     cout << "GPSHomography = " << endl;
     cout << GPSHomography << endl;
 
-    finalCornerPointsGPS = GPSHomography * finalCornerPoints;
+    // Break GPSHomography into two separate homography matrices.
+
+    break_frontal_plane_homography( GPSHomography, HomoFS, HomoR );
+
+    HomoFlip = Mat::eye(3, 3, CV_32FC1);
+    HomoFlip.at<Real_t>(1, 1) = -1.0;
+
+    // Calculate new bounding points based on HomoR.
+    Mat rotatedCornerPoints = HomoR * blendedCornerPoints;
+    Real_t rotMinX = 0.0, rotMaxX = 0.0, rotMinY = 0.0, rotMaxY = 0.0;
+    find_bounding_xy(rotatedCornerPoints, rotMinX, rotMaxX, rotMinY, rotMaxY);
+    // Re-use rotatedCornerPoints.
+    arrange_bounding_xy_as_corners(rotatedCornerPoints, rotMinX, rotMaxX, rotMinY, rotMaxY);
+
+    _finalCornerPointsGPS.create(3, 4, CV_32FC1);
+    Mat finalCornerPointsGPS = _finalCornerPointsGPS.getMat();
+
+    finalCornerPointsGPS = HomoFlip * HomoFS * rotatedCornerPoints;
 
     // Shift according the east and north shifts.
-    finalCornerPointsGPS.at<double>(0, 0) += -shiftEast;
-    finalCornerPointsGPS.at<double>(1, 0) += -shiftNorth;
-    finalCornerPointsGPS.at<double>(0, 1) += -shiftEast;
-    finalCornerPointsGPS.at<double>(1, 1) += -shiftNorth;
+    finalCornerPointsGPS.at<Real_t>(0, 0) += -shiftEast;
+    finalCornerPointsGPS.at<Real_t>(1, 0) += -shiftNorth;
+    finalCornerPointsGPS.at<Real_t>(0, 1) += -shiftEast;
+    finalCornerPointsGPS.at<Real_t>(1, 1) += -shiftNorth;
+    finalCornerPointsGPS.at<Real_t>(0, 2) += -shiftEast;
+    finalCornerPointsGPS.at<Real_t>(1, 2) += -shiftNorth;
+    finalCornerPointsGPS.at<Real_t>(0, 3) += -shiftEast;
+    finalCornerPointsGPS.at<Real_t>(1, 3) += -shiftNorth;
 
     cout << "The final corner points are: " << endl;
     cout << finalCornerPointsGPS << endl;
@@ -608,25 +775,73 @@ static void find_final_cornerpoints_GPS(
 
     geo::Real_t lon = 0.0, lat = 0.0;
 
-    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<double>(0, 0), finalCornerPointsGPS.at<double>(1, 0),
+    cout.precision(12);
+
+    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 0), finalCornerPointsGPS.at<Real_t>(1, 0),
         lon, lat );
 
-    cout.precision(12);
     cout << " Upper left: " << PJ_R2D(lon) << "E, " << PJ_R2D(lat) << "N." << endl;
 
-    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<double>(0, 1), finalCornerPointsGPS.at<double>(1, 1),
+    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 1), finalCornerPointsGPS.at<Real_t>(1, 1),
+        lon, lat );
+
+    cout << " Upper right: " << PJ_R2D(lon) << "E, " << PJ_R2D(lat) << "N." << endl;
+
+    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 2), finalCornerPointsGPS.at<Real_t>(1, 2),
         lon, lat );
 
     cout << " Bottom right: " << PJ_R2D(lon) << "E, " << PJ_R2D(lat) << "N." << endl;
+
+    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 3), finalCornerPointsGPS.at<Real_t>(1, 3),
+        lon, lat );
+
+    cout << " Bottom left: " << PJ_R2D(lon) << "E, " << PJ_R2D(lat) << "N." << endl;
+
+    // Final rotation homograph.
+    _finalRotateH.create(3, 3, CV_32FC1);
+    Mat finalRotateH = _finalRotateH.getMat();
+    HomoR.copyTo( finalRotateH );
+}
+
+static void warp_and_shift(const Mat& src, const Mat& H, OutputArray _dst)
+{
+    // Create 4 corner poitns for src.
+    Mat CPs = Mat(3, 4, CV_32FC1);
+    CPs.at<Real_t>(0, 0) =          0.0; CPs.at<Real_t>(1, 0) =          0.0; CPs.at<Real_t>(2, 0) = 1.0;
+    CPs.at<Real_t>(0, 1) = src.cols - 1; CPs.at<Real_t>(1, 1) =          0.0; CPs.at<Real_t>(2, 1) = 1.0;
+    CPs.at<Real_t>(0, 2) = src.cols - 1; CPs.at<Real_t>(1, 2) = src.rows - 1; CPs.at<Real_t>(2, 2) = 1.0;
+    CPs.at<Real_t>(0, 3) =          0.0; CPs.at<Real_t>(1, 3) = src.rows - 1; CPs.at<Real_t>(2, 3) = 1.0;
+
+    // Warp these 4 corner points.
+    Mat warppedCorners = H * CPs;
+
+    // Debug.
+    cout << "warp_and_shift: warppedCorners: " << endl << warppedCorners << endl;
+
+    // Find the bounding x and y.
+    Real_t minX = 0.0, maxX = 0.0, minY = 0.0, maxY = 0.0;
+    find_bounding_xy( warppedCorners, minX, maxX, minY, maxY );
+
+    // New H.
+    Mat newH( H.size(), H.type() );
+    H.copyTo( newH );
+
+    newH.at<Real_t>(0, 2) -= minX;
+    newH.at<Real_t>(1, 2) -= minY;
+
+    _dst.create( maxY - minY + 1, maxX - minX + 1, src.type() );
+    Mat dst = _dst.getMat();
+
+    warpPerspective( src, dst, newH, Size( dst.cols, dst.rows ));
 }
 
 void BlendedMapper::multi_image_homography_direct_blending(
         const string& baseDir, const string& homoDir, const string& gpsFile,
-        bool skipBlending)
+        bool skipBlending, bool skipSeamFinding)
 {
     // Parse the CSV file first.
     csv::Table_t table;
-    double shiftEast = 0.0, shiftNorth = 0.0;
+    Real_t shiftEast = 0.0, shiftNorth = 0.0;
 
     try
     {
@@ -643,7 +858,6 @@ void BlendedMapper::multi_image_homography_direct_blending(
         return;
     }
     
-
     cout << gpsFile << " parsed." << endl;
 
     // Find all the homography files at once.
@@ -654,21 +868,48 @@ void BlendedMapper::multi_image_homography_direct_blending(
 
     vector<Mat> warppedCenterPointVec;
     vector<int> idxKFInCSVTable;
-    Mat gsh = Mat::eye( 3, 3, CV_64FC1 );
+    Mat gsh = Mat::eye( 3, 3, CV_32FC1 );
     
     // Calculate the upper left and the bottom right corener points.
-    Mat finalCornerPoints(3, 2, CV_64FC1);
+    Mat blendedCornerPoints(3, 4, CV_32FC1);
+
+    Mat blended;
 
     directly_blend( baseDir, files,
         warppedCenterPointVec, idxKFInCSVTable, 
-        gsh, finalCornerPoints,
+        gsh, blendedCornerPoints,
         "MultiImageBlendingDirectly", 
-        mBlenderBand, skipBlending );
+        mBlenderBand, skipBlending, skipSeamFinding, blended );
     
     // Final corner points.
-    Mat finalCornerPointsGPS( finalCornerPoints.size(), CV_64FC1 );
+    Mat finalCornerPointsGPS, finalRotateH;
+
     find_final_cornerpoints_GPS( 
         warppedCenterPointVec, idxKFInCSVTable, table,
-        gsh, finalCornerPoints, shiftEast, shiftNorth,
-        finalCornerPointsGPS );
+        gsh, blendedCornerPoints, shiftEast, shiftNorth,
+        finalCornerPointsGPS, finalRotateH );
+
+    // Final rotation.
+    cout << "finalRotateH = " << endl << finalRotateH << endl;
+    Mat finalMat;
+
+    if ( false == skipBlending )
+    {
+        warp_and_shift( blended, finalRotateH, finalMat );
+
+        // Write file.
+        write_image("finalMat", finalMat, mImageType);
+    }
+
+    // Debug
+    if ( true == skipBlending )
+    {
+        // Read the image.
+        blended = imread("MultiImageBlendingDirectly.png", IMREAD_COLOR);
+        
+        warp_and_shift( blended, finalRotateH, finalMat );
+
+        // Write file.
+        write_image("finalMat", finalMat, mImageType);
+    }
 }
