@@ -1,4 +1,7 @@
 
+// Author: Yaoyu Hu <hyy0289@woozoom.net>
+// Date: Created on 20181123
+
 #include <ctime>
 #include <fstream>
 #include <iostream>
@@ -87,7 +90,7 @@ int main(int argc, char* argv[])
     }
     else
     {
-        std::cout << "Unexpected \"app\" setting. \"app\" = \"" << j["app"] << "\"" << std::endl;
+        std::cout << "Unexpected \"app\" setting. \"app\" = " << j["app"] << "" << std::endl;
         return -1;
     }
 
