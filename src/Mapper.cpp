@@ -627,9 +627,20 @@ static void break_frontal_plane_homography(InputArray _H, OutputArray _FS, Outpu
     FS.at<Real_t>(1, 1) = f; FS.at<Real_t>(1, 2) = LH.at<Real_t>(1, 2);
     FS.at<Real_t>(2, 2) = 1.0;
 
+    // Mat FSI( 3, 3, CV_32FC1);
+    // FSI.setTo( Scalar::all(0) );
+
+    // FSI.at<Real_t>(0, 0) = 1/f; FSI.at<Real_t>(0, 2) = -LH.at<Real_t>(0, 2) / f;
+    // FSI.at<Real_t>(1, 1) = 1/f; FSI.at<Real_t>(1, 2) = -LH.at<Real_t>(1, 2) / f;
+    // FSI.at<Real_t>(2, 2) = 1.0;
+
+
     R.at<Real_t>(0, 0) = LH.at<Real_t>(0, 0) / f; R.at<Real_t>(0, 1) = LH.at<Real_t>(0, 1) / f;
     R.at<Real_t>(1, 0) = LH.at<Real_t>(1, 0) / f; R.at<Real_t>(1, 1) = LH.at<Real_t>(1, 1) / f;
     R.at<Real_t>(2, 2) = 1.0;
+
+    // Mat temp = FSI * LH;
+    // temp.copyTo( R );
 }
 
 template<typename _T> 
@@ -662,13 +673,37 @@ static void write_mat_single_channel(const string& fn, const Mat& m)
     ofs.close();
 }
 
+template <typename _T> 
+static void normalize_points(Mat& points)
+{
+    // Check if rows of points is 3.
+    if ( 3 != points.rows )
+    {
+        EXCEPTION_BASE("Rows of points must be three.");
+    }
+
+    // Check if chennals is 1.
+    if ( 1 != points.channels() )
+    {
+        EXCEPTION_BASE("Chennals of points must be 1.")
+    }
+
+    for ( int i = 0; i < points.cols; ++i )
+    {
+        points.at<_T>(0, i) /= points.at<_T>(2, i);
+        points.at<_T>(1, i) /= points.at<_T>(2, i);
+        points.at<_T>(2, i) /= points.at<_T>(2, i);
+    }
+}
+
 static void find_final_cornerpoints_GPS( 
     const vector<Mat>& warppedCenterPointVec, 
     const vector<int>& idxKFInCSVTable, const csv::Table_t& table,
     const Mat& gsh, const Mat& blendedCornerPoints, 
     Real_t shiftEast, Real_t shiftNorth,
     OutputArray _finalCornerPointsGPS, 
-    OutputArray _finalRotateH  )
+    OutputArray _finalRotateH,
+    const string& outDir )
 {
     Mat shiftedCenterPoint;
     int idxCSV;
@@ -701,8 +736,8 @@ static void find_final_cornerpoints_GPS(
     scale_points( pointSrc, TSrc, SSrc );
     scale_points( pointDst, TDst, SDst );
 
-    write_points( pointSrc, "pointSrc.dat" );
-    write_points( pointDst, "pointDst.dat" );
+    write_points( pointSrc, outDir + "/pointSrc.dat" );
+    write_points( pointDst, outDir + "/pointDst.dat" );
 
     cout << "TSrc = " << endl << TSrc << endl;
     cout << "SSrc = " << endl << SSrc << endl;
@@ -724,7 +759,10 @@ static void find_final_cornerpoints_GPS(
     GPSHomography = findHomography( pointSrc, pointDst, RANSAC, 2, noArray(), 10000, 0.999 );
     GPSHomography.convertTo( GPSHomography, CV_32FC1 );
 
-    write_mat_single_channel<Real_t>("GPSHomography.dat", GPSHomography);
+    write_mat_single_channel<Real_t>(outDir + "/GPSHomography.dat", GPSHomography);
+
+    break_frontal_plane_homography( GPSHomography, HomoFS, HomoR );
+    write_mat_single_channel<Real_t>(outDir + "/ComposedHomography.dat", HomoFS*HomoR);
 
     cout << "TDstInv.type() = " << TDstInv.type() << endl;
     cout << "SDstInv.type() = " << SDstInv.type() << endl;
@@ -742,21 +780,38 @@ static void find_final_cornerpoints_GPS(
     // Break GPSHomography into two separate homography matrices.
 
     break_frontal_plane_homography( GPSHomography, HomoFS, HomoR );
+    // write_mat_single_channel<Real_t>("ComposedHomography.dat", HomoFS*HomoR);
 
     HomoFlip = Mat::eye(3, 3, CV_32FC1);
     HomoFlip.at<Real_t>(1, 1) = -1.0;
 
-    // Calculate new bounding points based on HomoR.
-    Mat rotatedCornerPoints = HomoR * blendedCornerPoints;
     Real_t rotMinX = 0.0, rotMaxX = 0.0, rotMinY = 0.0, rotMaxY = 0.0;
-    find_bounding_xy(rotatedCornerPoints, rotMinX, rotMaxX, rotMinY, rotMaxY);
-    // Re-use rotatedCornerPoints.
-    arrange_bounding_xy_as_corners(rotatedCornerPoints, rotMinX, rotMaxX, rotMinY, rotMaxY);
 
     _finalCornerPointsGPS.create(3, 4, CV_32FC1);
     Mat finalCornerPointsGPS = _finalCornerPointsGPS.getMat();
 
-    finalCornerPointsGPS = HomoFlip * HomoFS * rotatedCornerPoints;
+    // // Calculate new bounding points based on HomoR.
+    // Mat rotatedCornerPoints = HomoR * blendedCornerPoints;
+    // // normalize_points<Real_t>(rotatedCornerPoints);
+
+    // find_bounding_xy(rotatedCornerPoints, rotMinX, rotMaxX, rotMinY, rotMaxY);
+    // // Re-use rotatedCornerPoints.
+    // arrange_bounding_xy_as_corners(rotatedCornerPoints, rotMinX, rotMaxX, rotMinY, rotMaxY);
+
+    // finalCornerPointsGPS = HomoFlip * HomoFS * rotatedCornerPoints;
+    // // normalize_points<Real_t>(finalCornerPointsGPS); // Not necessary.
+
+    // finalCornerPointsGPS = HomoFlip * GPSHomography * blendedCornerPoints;
+    finalCornerPointsGPS = HomoFS * HomoR * blendedCornerPoints;
+    normalize_points<Real_t>(finalCornerPointsGPS);
+    cout << "Final coner points before flipping: " << endl;
+    cout << finalCornerPointsGPS << endl;
+    finalCornerPointsGPS = HomoFlip * finalCornerPointsGPS;
+    cout << "Final coner points arter flipping: " << endl;
+    cout << finalCornerPointsGPS << endl;
+
+    find_bounding_xy( finalCornerPointsGPS, rotMinX, rotMaxX, rotMinY, rotMaxY );
+    arrange_bounding_xy_as_corners( finalCornerPointsGPS, rotMinX, rotMaxX, rotMinY, rotMaxY );
 
     // Shift according the east and north shifts.
     finalCornerPointsGPS.at<Real_t>(0, 0) += -shiftEast;
@@ -771,31 +826,40 @@ static void find_final_cornerpoints_GPS(
     cout << "The final corner points are: " << endl;
     cout << finalCornerPointsGPS << endl;
 
+    // Write upper left and bottom right corners into file.
+    ofstream ofsGeoTiff;
+    ofsGeoTiff.open( outDir + "/GeoTiffInput.dat" );
+
     geo::GeoTransform gt(51);
 
     geo::Real_t lon = 0.0, lat = 0.0;
 
     cout.precision(12);
-
-    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 0), finalCornerPointsGPS.at<Real_t>(1, 0),
-        lon, lat );
-
-    cout << " Upper left: " << PJ_R2D(lon) << "E, " << PJ_R2D(lat) << "N." << endl;
-
-    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 1), finalCornerPointsGPS.at<Real_t>(1, 1),
-        lon, lat );
-
-    cout << " Upper right: " << PJ_R2D(lon) << "E, " << PJ_R2D(lat) << "N." << endl;
-
-    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 2), finalCornerPointsGPS.at<Real_t>(1, 2),
-        lon, lat );
-
-    cout << " Bottom right: " << PJ_R2D(lon) << "E, " << PJ_R2D(lat) << "N." << endl;
+    ofsGeoTiff.precision(12);
 
     gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 3), finalCornerPointsGPS.at<Real_t>(1, 3),
         lon, lat );
 
-    cout << " Bottom left: " << PJ_R2D(lon) << "E, " << PJ_R2D(lat) << "N." << endl;
+    cout << fixed << " Upper left (E, N): " << PJ_R2D(lon) << ", " << PJ_R2D(lat) << "." << endl;
+    ofsGeoTiff << fixed << PJ_R2D(lon) << " " << PJ_R2D(lat) << endl;
+
+    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 2), finalCornerPointsGPS.at<Real_t>(1, 2),
+        lon, lat );
+
+    cout << fixed << " Upper right (E, N): " << PJ_R2D(lon) << ", " << PJ_R2D(lat) << "." << endl;
+
+    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 1), finalCornerPointsGPS.at<Real_t>(1, 1),
+        lon, lat );
+
+    cout << fixed << " Bottom right (E, N): " << PJ_R2D(lon) << ", " << PJ_R2D(lat) << "." << endl;
+    ofsGeoTiff << fixed << PJ_R2D(lon) << " " << PJ_R2D(lat) << endl;
+
+    gt.UTM_to_lat_lon( finalCornerPointsGPS.at<Real_t>(0, 0), finalCornerPointsGPS.at<Real_t>(1, 0),
+        lon, lat );
+
+    cout << fixed << " Bottom left (E, N): " << PJ_R2D(lon) << ", " << PJ_R2D(lat) << "." << endl;
+
+    ofsGeoTiff.close();
 
     // Final rotation homograph.
     _finalRotateH.create(3, 3, CV_32FC1);
@@ -814,6 +878,7 @@ static void warp_and_shift(const Mat& src, const Mat& H, OutputArray _dst)
 
     // Warp these 4 corner points.
     Mat warppedCorners = H * CPs;
+    normalize_points<Real_t>(warppedCorners);
 
     // Debug.
     cout << "warp_and_shift: warppedCorners: " << endl << warppedCorners << endl;
@@ -836,7 +901,7 @@ static void warp_and_shift(const Mat& src, const Mat& H, OutputArray _dst)
 }
 
 void BlendedMapper::multi_image_homography_direct_blending(
-        const string& baseDir, const string& homoDir, const string& gpsFile,
+        const string& baseDir, const string& outDir, const string& gpsFile,
         bool skipBlending, bool skipSeamFinding)
 {
     // Parse the CSV file first.
@@ -861,7 +926,7 @@ void BlendedMapper::multi_image_homography_direct_blending(
     cout << gpsFile << " parsed." << endl;
 
     // Find all the homography files at once.
-    const path inputPath   = homoDir;
+    const path inputPath   = baseDir + "/homographies";
     const path filePattern = "*.yml";
     vector<string> files;
     find_files(inputPath, ".yml", files);
@@ -874,11 +939,12 @@ void BlendedMapper::multi_image_homography_direct_blending(
     Mat blendedCornerPoints(3, 4, CV_32FC1);
 
     Mat blended;
+    string blendedFn = outDir + "/MultiImageBlendingDirectly";
 
     directly_blend( baseDir, files,
         warppedCenterPointVec, idxKFInCSVTable, 
         gsh, blendedCornerPoints,
-        "MultiImageBlendingDirectly", 
+        blendedFn, 
         mBlenderBand, skipBlending, skipSeamFinding, blended );
     
     // Final corner points.
@@ -887,29 +953,28 @@ void BlendedMapper::multi_image_homography_direct_blending(
     find_final_cornerpoints_GPS( 
         warppedCenterPointVec, idxKFInCSVTable, table,
         gsh, blendedCornerPoints, shiftEast, shiftNorth,
-        finalCornerPointsGPS, finalRotateH );
+        finalCornerPointsGPS, finalRotateH, outDir );
 
     // Final rotation.
     cout << "finalRotateH = " << endl << finalRotateH << endl;
     Mat finalMat;
+    string finalMatFn = outDir + "/finalMat";
 
     if ( false == skipBlending )
     {
         warp_and_shift( blended, finalRotateH, finalMat );
 
         // Write file.
-        write_image("finalMat", finalMat, mImageType);
+        write_image(finalMatFn, finalMat, mImageType);
     }
-
-    // Debug
-    if ( true == skipBlending )
+    else
     {
         // Read the image.
-        blended = imread("MultiImageBlendingDirectly.png", IMREAD_COLOR);
+        blended = imread(blendedFn + ".png", IMREAD_COLOR);
         
         warp_and_shift( blended, finalRotateH, finalMat );
 
         // Write file.
-        write_image("finalMat", finalMat, mImageType);
+        write_image(finalMatFn, finalMat, mImageType);
     }
 }

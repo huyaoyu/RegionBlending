@@ -30,7 +30,7 @@ public:
     ~BlendedMapper();
 
     void multi_image_homography_direct_blending(
-        const string& baseDir, const string& homoDir, const string& gpsFile,
+        const string& baseDir, const string& outDir, const string& gpsFile,
         bool skipBlending = false, bool skipSeamFinding = false);
 
     void set_blender_band(int b);

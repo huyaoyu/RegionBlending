@@ -1,5 +1,5 @@
 # cmake needs this line
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.8)
 
 # Enable C++11
 set(CMAKE_CXX_STANDARD 11)
@@ -45,6 +45,10 @@ set(CMAKE_CROSSCOMPILING FALSE)
 find_package(PROJ4 5.2.0)
 message(STATUS "PROJ4_LIBRARIES: ${PROJ4_LIBRARIES}")
 
+# json.
+find_package(nlohmann_json REQUIRED)
+message(STATUS "nlohmann_json_FOUND: ${nlohmann_json_FOUND}")
+
 # Search for source files.
 FILE(GLOB SRC_FILES *.cpp)
 
@@ -54,4 +58,4 @@ message(STATUS "SRC_FILES: ${SRC_FILES}")
 add_executable(TestBlending_exe ${SRC_FILES})
 
 # Link your application with OpenCV libraries
-target_link_libraries(TestBlending_exe ${OpenCV_LIBS} ${Boost_LIBRARIES} ${PROJ4_LIBRARIES})
+target_link_libraries(TestBlending_exe PRIVATE nlohmann_json::nlohmann_json ${OpenCV_LIBS} ${Boost_LIBRARIES} ${PROJ4_LIBRARIES})

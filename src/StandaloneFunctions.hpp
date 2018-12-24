@@ -9,7 +9,7 @@ void test_region_blending_and_overwriting(std::string& imgFn0, std::string& imgF
 void test_boost_filesystem_and_opencv_yaml(void);
 void test_two_image_homography(void);
 void test_two_image_homography_direct_blending(void);
-void test_multi_image_homography(void);
+void test_multi_image_homography(const std::string& inputDir, const std::string& outputDir);
 void test_multi_image_homography_direct_blending(bool skipBlending = false);
 
 #endif // __STANDALONEFUNCTIONS_HPP__

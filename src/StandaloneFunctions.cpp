@@ -967,10 +967,10 @@ void test_two_image_homography_direct_blending(void)
     cv::waitKey();
 }
 
-void test_multi_image_homography(void)
+void test_multi_image_homography(const std::string& inputDir, const std::string& outputDir)
 {
     // Find all the homography files at once.
-    const path inputPath = "../Data/bimos/homographies";
+    const path inputPath = inputDir + "/homographies";
     // const path inputPath = "../Data/edge_scale_0.1_B/homographies";
     const path filePattern = "*.yml";
 
@@ -996,7 +996,7 @@ void test_multi_image_homography(void)
         fs["filename"] >> tempString;
 
         boost::filesystem::path p(tempString);
-        imgFn = "../Data/bimos/images/" + p.filename().string();
+        imgFn = inputDir + "/images/" + p.filename().string();
         // imgFn = "../Data/edge_scale_0.1_B/images/" + p.filename().string();
         vecImgFn.push_back( imgFn );
         std::cout << count << "/" << nFiles<< ": " << imgFn << std::endl;
@@ -1071,7 +1071,7 @@ void test_multi_image_homography(void)
     cv::imshow("Blended image", canvas);
     cv::waitKey();
 
-    cv::imwrite("canvas.jpg", canvas);
+    cv::imwrite(outputDir + "/canvas.jpg", canvas);
 }
 
 void convert_csv_table(csv::Table_t& table)
